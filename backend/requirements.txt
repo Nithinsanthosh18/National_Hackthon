@@ -7,3 +7,6 @@ numpy
 matplotlib
 python-multipart
 pydantic
+facenet-pytorch
+torch
+torchvision

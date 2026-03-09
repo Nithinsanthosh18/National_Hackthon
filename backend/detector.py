@@ -7,26 +7,16 @@ class ThreatDetector:
     def __init__(self, model_path='yolo26n.pt'):
         # Load the YOLO model
         self.model = YOLO(model_path)
+        self.rules = [] # List of active RuleDB objects
         
-        # Define threat classes (COCO class ID mapping)
-        # 0: person
-        # 2-7: vehicles
-        # 24: backpack, 28: suitcase
-        # 43: knife
-        self.THREAT_CLASSES = ['knife', 'gun']  # High priority threats
-        self.SUSPICIOUS_OBJECTS = ['backpack', 'suitcase'] # Needs tracking
-        self.VEHICLE_CLASSES = ['car', 'motorcycle', 'bus', 'truck']
-        
-        # Simplified tracking for abandoned objects
-        # Format: {obj_id: {'class': name, 'first_seen': timestamp, 'last_seen': timestamp, 'location': (x, y)}}
-        self.tracked_objects = {}
-        
-        # Define a mock restricted zone for intrusion detection (polygon points)
-        # Normally this would be configurable via the UI
+        # Keep internal restricted zone for intrusion fallback
         self.restricted_zone = [(100, 100), (500, 100), (500, 400), (100, 400)]
 
+    def set_rules(self, rules):
+        """Update the active rules for this detector instance."""
+        self.rules = rules
+
     def is_in_restricted_zone(self, center_x, center_y):
-        # A simple bounding box check for the restricted zone
         if self.restricted_zone:
             x_min = min(p[0] for p in self.restricted_zone)
             x_max = max(p[0] for p in self.restricted_zone)
@@ -42,6 +32,9 @@ class ThreatDetector:
         detected_threats = []
         persons_locations = []
         
+        # Create a copy for annotation
+        annotated_frame = frame.copy()
+        
         # Parse results
         for box in results.boxes:
             class_id = int(box.cls[0])
@@ -52,31 +45,64 @@ class ThreatDetector:
             x1, y1, x2, y2 = map(int, box.xyxy[0])
             center_x, center_y = (x1 + x2) // 2, (y1 + y2) // 2
             
-            threat_level = 'none'
-            
-            # Logic: Weapons
-            if class_name in self.THREAT_CLASSES:
-                threat_level = 'critical'
-            
-            # Logic: Intrusion
-            elif class_name == 'person':
+            if class_name == 'person':
                 persons_locations.append((center_x, center_y))
-                if self.is_in_restricted_zone(center_x, center_y):
-                    threat_level = 'high'
-                    class_name = 'person (intrusion)'
+
+            # Logic check: Rules vs Defaults
+            matching_rule = None
+            for rule in self.rules:
+                # Find if any rule (enabled or not) targets this object
+                targets = [t.strip().lower() for t in rule.target.split(',')]
+                is_intrusion = rule.category in ['Zone', 'Behavior'] and 'intrusion' in rule.target.lower()
+                
+                if class_name.lower() in targets or (is_intrusion and class_name == 'person' and self.is_in_restricted_zone(center_x, center_y)):
+                    matching_rule = rule
+                    break
             
-            # Logic: Suspicious object (simplified)
-            elif class_name in self.SUSPICIOUS_OBJECTS:
-                threat_level = 'medium'
+            final_threat = None
             
-            # Track detected object
-            if threat_level != 'none':
-                detected_threats.append({
+            # Case 1: Matching Rule Found
+            if matching_rule:
+                if matching_rule.enabled:
+                    # Show with rule-specific level/label
+                    display_name = "Intrusion" if 'intrusion' in matching_rule.target.lower() else class_name
+                    final_threat = {
+                        'object': display_name,
+                        'level': matching_rule.alert_severity.lower(),
+                        'confidence': conf,
+                        'bbox': (x1, y1, x2, y2),
+                        'center': (center_x, center_y)
+                    }
+                else:
+                    # Rule exists but is disabled -> HIDE (suppress)
+                    continue
+            
+            # Case 2: No Rule -> Show by default (Normal Behavior)
+            else:
+                final_threat = {
                     'object': class_name,
-                    'level': threat_level,
+                    'level': 'info', # Default visibility level
                     'confidence': conf,
                     'bbox': (x1, y1, x2, y2),
                     'center': (center_x, center_y)
-                })
-        
-        return results.plot(), detected_threats, persons_locations
+                }
+            
+            # Draw the box if it hasn't been suppressed
+            if final_threat:
+                # Add to alerts if it's significant (rule match or default person/weapon)
+                # For 'info' level, we might not want to log it in the DB, 
+                # but we'll show it in the feed.
+                if final_threat['level'] != 'info' or class_name.lower() in ['person', 'weapon', 'gun', 'knife', 'firearm']:
+                    detected_threats.append(final_threat)
+                
+                # Styling
+                if final_threat['level'] == 'high': color = (0, 0, 255) # Red
+                elif final_threat['level'] == 'medium': color = (0, 165, 255) # Orange
+                elif final_threat['level'] == 'low': color = (0, 255, 0) # Green
+                else: color = (200, 200, 200) # Gray for 'info'
+                
+                cv2.rectangle(annotated_frame, (x1, y1), (x2, y2), color, 2)
+                label = f"{final_threat['object']} {conf:.2f}"
+                cv2.putText(annotated_frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, color, 1)
+
+        return annotated_frame, detected_threats, persons_locations
