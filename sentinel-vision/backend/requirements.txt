@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+sqlalchemy
+opencv-contrib-python
+ultralytics
+numpy
+matplotlib
+python-multipart
+pydantic

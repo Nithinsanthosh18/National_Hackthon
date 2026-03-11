@@ -1,0 +1,28 @@
+# Environment and build
+backend/venv/
+backend/__pycache__/
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+
+# Database
+backend/sentinel.db
+
+# Python
+*.pyc
+*.pyo
+*.pyd
+
+# AI Weights and Runs
+*.pt
+*.onnx
+runs/
+Dataset/
+yolo26n.pt
+
+# User Data
+User/
+!User/.gitkeep
+
+# Environment variables
+.env

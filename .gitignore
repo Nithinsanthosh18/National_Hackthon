@@ -1,0 +1,28 @@
+# Dependencies
+**/node_modules/
+**/venv/
+**/__pycache__/
+**/dist/
+**/.vite/
+
+# Python artifacts
+*.pyc
+*.pyo
+*.pyd
+
+# Database
+*.db
+*.sqlite3
+
+# AI Models and Data
+*.pt
+*.onnx
+runs/
+Dataset/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
